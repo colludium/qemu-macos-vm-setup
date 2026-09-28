@@ -1,0 +1,14 @@
+# Disk images and firmware state never belong in git
+*.qcow2
+*.img
+*.iso
+*.fd
+*.vdi
+*.vmdk
+
+# Generated from the .template files by ./install.sh
+macos-sonoma/macos.xml
+macos-sonoma/run.sh
+win11/win11.xml
+
+*.log

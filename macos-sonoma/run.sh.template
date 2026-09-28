@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Fallback launcher for macOS Sonoma, bypassing libvirt.
+# Normally just use virt-manager (or: virsh -c qemu:///session start macos-sonoma).
+# This exists for debugging when libvirt is in the way.
+#
+# The env scrubbing is needed only when launched from a terminal inside the
+# VS Code *snap*, which injects GTK/LOCPATH/PATH entries pointing into
+# /snap/code/<rev>; QEMU then loads snap's glibc and dies with
+#   undefined symbol: __libc_pthread_init
+# Harmless elsewhere.
+
+D=__VM_ROOT__/macos-sonoma
+cd "$D" || exit 1
+
+exec env \
+  -u SNAP -u SNAP_ARCH -u SNAP_COMMON -u SNAP_CONTEXT -u SNAP_DATA -u SNAP_EUID \
+  -u SNAP_INSTANCE_NAME -u SNAP_LAUNCHER_ARCH_TRIPLET -u SNAP_NAME -u SNAP_REAL_HOME \
+  -u SNAP_REVISION -u SNAP_UID -u SNAP_USER_COMMON -u SNAP_USER_DATA -u SNAP_VERSION \
+  -u GTK_PATH -u GTK_EXE_PREFIX -u GTK_IM_MODULE_FILE \
+  -u GDK_PIXBUF_MODULEDIR -u GDK_PIXBUF_MODULE_FILE \
+  -u GSETTINGS_SCHEMA_DIR -u GIO_MODULE_DIR -u LOCPATH \
+  -u VSCODE_NLS_CONFIG -u MXC_BIN_DIR -u XDG_DATA_HOME \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  XDG_DATA_DIRS=/usr/share/cinnamon:/usr/local/share:/usr/share:/var/lib/snapd/desktop \
+  DISPLAY="${DISPLAY:-:0}" XAUTHORITY=__HOME__/.Xauthority \
+  qemu-system-x86_64 \
+    -enable-kvm -m 8192 \
+    -cpu Skylake-Client,-hle,-rtm,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check \
+    -machine q35 -smp 4,cores=2,sockets=1 \
+    -device qemu-xhci,id=xhci \
+    -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \
+    -device isa-applesmc,osk="ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc" \
+    -drive if=pflash,format=raw,readonly=on,file="$D/OVMF_CODE.fd" \
+    -drive if=pflash,format=raw,file="$D/OVMF_VARS.fd" \
+    -smbios type=2 \
+    -device ich9-intel-hda -device hda-duplex \
+    -device ich9-ahci,id=sata \
+    -drive id=OpenCoreBoot,if=none,snapshot=on,format=qcow2,file="$D/OpenCore.qcow2" \
+    -device ide-hd,bus=sata.2,drive=OpenCoreBoot \
+    -drive id=MacHDD,if=none,format=qcow2,file="$D/macos.qcow2" \
+    -device ide-hd,bus=sata.4,drive=MacHDD \
+    -netdev user,id=net0 -device virtio-net-pci,netdev=net0,id=net0 \
+    -monitor telnet:127.0.0.1:4444,server,nowait \
+    -device vmware-svga
