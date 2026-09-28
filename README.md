@@ -1,4 +1,4 @@
-# qemu-vm-setup
+# qemu-macos-vm-setup
 
 Working libvirt/QEMU definitions for running **macOS Sonoma** and **Windows 11**
 as desktop VMs on a Linux host, managed together in virt-manager.
