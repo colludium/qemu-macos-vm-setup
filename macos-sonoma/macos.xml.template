@@ -3,7 +3,16 @@
   <title>macOS Sonoma</title>
   <description>macOS Sonoma 14 via OpenCore. CPU model, applesmc and smbios are passed through
   qemu:commandline because kvm=on / vmware-cpuid-freq=on are not expressible in libvirt's cpu element.
-  Do not remove the isa-applesmc device - macOS will not boot without it.</description>
+  Do not remove the isa-applesmc device - macOS will not boot without it.
+  USB (qemu-xhci), video (VGA) and networking (vmxnet3) are also passed through
+  qemu:commandline, attached directly to pcie.0 instead of behind libvirt's auto-generated
+  pcie-root-port bridges - macOS's drivers silently fail to engage with any of these three
+  when they sit behind one of those bridges (no error logged, they just never bind; USB
+  manifests as keyboard/mouse dead at login though they work fine at the OpenCore picker;
+  networking manifests as Ethernet stuck on "Not Connected"). See the README's "Fixed"
+  section. The usb controller (model=none) and video (model=none) stanzas below (and the
+  absence of an interface element) exist to stop libvirt auto-adding its own bridged
+  versions of these devices.</description>
   <memory unit='MiB'>8192</memory>
   <currentMemory unit='MiB'>8192</currentMemory>
   <vcpu placement='static'>4</vcpu>
@@ -39,23 +48,29 @@
       <boot order='2'/>
     </disk>
     <controller type='sata' index='0'/>
-    <controller type='usb' index='0' model='qemu-xhci' ports='15'/>
-    <interface type='user'>
-      <model type='virtio'/>
-    </interface>
-    <input type='tablet' bus='usb'/>
-    <input type='keyboard' bus='usb'/>
-    <graphics type='spice' autoport='yes'>
+    <controller type='usb' index='0' model='none'/>
+    <graphics type='vnc' port='-1' autoport='yes' keymap='en-us'>
       <listen type='address'/>
-      <image compression='off'/>
     </graphics>
     <sound model='ich9'/>
     <video>
-      <model type='vmvga' heads='1' primary='yes'/>
+      <model type='none'/>
     </video>
     <memballoon model='none'/>
   </devices>
   <qemu:commandline>
+    <qemu:arg value='-netdev'/>
+    <qemu:arg value='user,id=net0'/>
+    <qemu:arg value='-device'/>
+    <qemu:arg value='vmxnet3,netdev=net0,id=net0dev,bus=pcie.0,addr=0x5'/>
+    <qemu:arg value='-device'/>
+    <qemu:arg value='qemu-xhci,id=xhci,bus=pcie.0,addr=0x3'/>
+    <qemu:arg value='-device'/>
+    <qemu:arg value='usb-kbd,bus=xhci.0'/>
+    <qemu:arg value='-device'/>
+    <qemu:arg value='usb-tablet,bus=xhci.0'/>
+    <qemu:arg value='-device'/>
+    <qemu:arg value='VGA,bus=pcie.0,addr=0x4,vgamem_mb=64'/>
     <qemu:arg value='-device'/>
     <qemu:arg value='isa-applesmc,osk=ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc'/>
     <qemu:arg value='-smbios'/>

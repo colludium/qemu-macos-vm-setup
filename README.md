@@ -63,6 +63,20 @@ Install with OSX-KVM's `OpenCore-Boot.sh` (attach `BaseSystem.img`), then move
 `macos.qcow2`, `OpenCore.qcow2` and the OVMF files here and use these domains
 instead. Detach `BaseSystem.img` once installed.
 
+Before first boot under these domains, check `EFI/OC/config.plist` on the
+`OpenCore.qcow2` EFI partition (mount it with `mtools`/`guestmount`, or boot
+once with OSX-KVM's own tooling and edit it there) for three things that
+stock OpenCore configs often leave unset, and which cause macOS's USB stack
+to silently never bind to QEMU's XHCI controller (see "Fixed" below for the
+full symptom):
+
+- `Kernel > Quirks > XhciPortLimit` → `true`
+- `Kernel > Add` → `USBToolBox.kext` and `UTBMap.kext` both `Enabled`
+- `DeviceProperties > Add` → a `built-in = 01` entry for the XHCI
+  controller's own PCI path (`PciRoot(0x0)/Pci(0x2,0x1)/Pci(0x0,0x0)` for
+  the topology these templates produce - confirm with `info qtree` in the
+  QEMU monitor if you've changed the topology)
+
 ## Day to day
 
     virt-manager                                    # both VMs in one list
@@ -88,6 +102,11 @@ your home and VM directory. The tradeoff is that session mode only offers
 user-mode (NAT) networking, with no bridging. Both VMs here use NAT, so it costs
 nothing.
 
+macOS has no inbox `virtio-net` driver, so its NIC is `vmxnet3` (macOS does
+have a native driver for that one, `AppleVmxnet3Ethernet`, built in for
+VMware Fusion compatibility) rather than virtio. Windows keeps `e1000e`
+(see the Windows gotcha below) since it needs to boot with inbox drivers too.
+
 virt-manager defaults to the system connection, so `install.sh` points it at the
 session one and installs a launcher that passes `--connect qemu:///session`
 explicitly. Relying on the `autoconnect` gsetting alone proved unreliable — it
@@ -104,6 +123,30 @@ hybrid host that reintroduces the hang described in
 [docs/hybrid-cpu.md](docs/hybrid-cpu.md).
 
 **At the OpenCore picker, choose `MacHD`**, not `EFI`.
+
+**Fixed: keyboard, mouse and networking were all dead in macOS once booted**
+(they worked fine at the OpenCore picker - UEFI-level input - then stopped
+the moment macOS's own kernel drivers took over). Root cause: libvirt's
+default q35 topology puts USB (`qemu-xhci`), video and network devices
+behind auto-generated `pcie-root-port` bridges, and macOS's drivers silently
+fail to engage with any device sitting behind one of those bridges - no
+error, they just never bind (confirmed by grepping a verbose (`-v`) macOS
+boot log for "usb"/"xhci"/"ethernet" and finding nothing, versus extensive
+AHCI/APFS logging for everything that *did* work). It has nothing to do with
+SPICE vs VNC, virt-manager vs `virt-viewer`, `usb-tablet` vs `usb-mouse`, or
+NIC model (`e1000`, `e1000e` and `vmxnet3` all failed identically) - those
+were all red herrings chased before the topology was identified as the
+actual cause. Windows wasn't affected because its own bridged topology
+happens not to trigger this particular driver failure.
+
+The fix, already baked into `macos.xml.template`: no `<interface>` element,
+and `<controller type='usb' model='none'/>` / `<video><model type='none'/>
+</video>` stanzas, so libvirt doesn't auto-add its own bridged versions of
+these devices. `<qemu:commandline>` then adds `qemu-xhci`, `VGA` and
+`vmxnet3` back in "by hand", attached directly to `pcie.0` (explicit
+`bus=pcie.0,addr=0x3/0x4/0x5`) instead of behind a root port - matching the
+flat topology `run.sh` always used, which is why `run.sh` never had this
+problem in the first place.
 
 **Windows uses SATA and e1000e here, deliberately.** Those match what a migrated
 VirtualBox VM already has drivers for. To get virtio speed, install the drivers
